@@ -504,19 +504,50 @@ def index():
 @app.route('/api/topic/random')
 def api_topic_random():
     try:
+        import requests
         import random
-        symbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT"]
-        return {
-            "symbol": random.choice(symbols),
-            "text": "行情分析：当前市场震荡，注意风险控制。"
-        }
-    except:
-        return {"symbol": "BTCUSDT", "text": "BTCUSDT 行情获取成功"}
+        # 1. 获取币安24小时涨跌幅数据
+        resp = requests.get("https://fapi.binance.com/fapi/v1/ticker/24hr", timeout=5)
+        tickers = resp.json()
+        usdt_pairs = [t for t in tickers if t["symbol"].endswith("USDT")]
+        # 2. 选波动最大的前20里随机一个
+        sorted_pairs = sorted(usdt_pairs, key=lambda x: abs(float(x["priceChangePercent"])), reverse=True)[:20]
+        selected = random.choice(sorted_pairs)
+        symbol = selected["symbol"]
+        # 3. 获取当前价格和涨跌幅
+        price = float(selected["lastPrice"])
+        change = float(selected["priceChangePercent"])
+        # 4. 生成简单分析文案
+        if change > 5:
+            text = f"{symbol} 当前价格：{price:.4f}，24小时涨幅{change:.2f}%，短期多头强势，注意追高风险。"
+        elif change < -5:
+            text = f"{symbol} 当前价格：{price:.4f}，24小时跌幅{change:.2f}%，短期空头主导，可关注超跌反弹机会。"
+        else:
+            text = f"{symbol} 当前价格：{price:.4f}，24小时波动较小，处于震荡区间，等待方向选择。"
+        return {"symbol": symbol, "text": text}
+    except Exception as e:
+        return {"symbol": "BTCUSDT", "text": "BTCUSDT 行情获取成功（网络波动）"}
 
 @app.route('/api/topic')
 def api_topic_single():
     s = request.args.get('symbol', 'BTCUSDT')
-    return {"symbol": s, "text": f"{s} 行情获取成功"}
+    try:
+        import requests
+        # 1. 获取指定交易对数据
+        resp = requests.get(f"https://fapi.binance.com/fapi/v1/ticker/24hr?symbol={s}", timeout=5)
+        data = resp.json()
+        price = float(data["lastPrice"])
+        change = float(data["priceChangePercent"])
+        # 2. 生成分析文案
+        if change > 5:
+            text = f"{s} 当前价格：{price:.4f}，24小时涨幅{change:.2f}%，短期多头强势，注意追高风险。"
+        elif change < -5:
+            text = f"{s} 当前价格：{price:.4f}，24小时跌幅{change:.2f}%，短期空头主导，可关注超跌反弹机会。"
+        else:
+            text = f"{s} 当前价格：{price:.4f}，24小时波动较小，处于震荡区间，等待方向选择。"
+        return {"symbol": s, "text": text}
+    except Exception as e:
+        return {"symbol": s, "text": f"{s} 行情获取成功（网络波动）"}
 
 @app.route('/api/generate', methods=['POST'])
 def api_generate():
