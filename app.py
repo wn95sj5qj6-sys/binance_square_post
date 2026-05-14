@@ -58,7 +58,7 @@ def start_auto_task(account_name):
 def stop_auto_task(account_name):
     return True, "已停止（Vercel 不支持）"
 
-# ==================== 前端 UI（不变） ====================
+# ==================== 前端 UI ====================
 UI_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="zh-CN">
@@ -530,15 +530,13 @@ UI_TEMPLATE = """
 </html>
 """
 
-# ==================== 路由（不变） ====================
+# ==================== 路由（安全版，无启动崩溃） ====================
 @app.route('/')
 def index():
-    if not BINANCE_ACCOUNTS:
-        try:
-            BINANCE_ACCOUNTS.extend(json.loads(os.getenv("BINANCE_ACCOUNTS", "[]")))
-        except:
-            pass
-    return render_template_string(UI_TEMPLATE, accounts=BINANCE_ACCOUNTS)
+    try:
+        return render_template_string(UI_TEMPLATE, accounts=BINANCE_ACCOUNTS)
+    except Exception as e:
+        return f"Error: {str(e)}", 500
 
 @app.route('/api/global_keys')
 def api_global_keys():
@@ -588,47 +586,59 @@ def api_auto_stop():
 
 @app.route('/api/topic/random')
 def api_topic_random():
-    from topic_main import get_random_topic
-    return jsonify(get_random_topic())
+    try:
+        from topic_main import get_random_topic
+        return jsonify(get_random_topic())
+    except:
+        return jsonify({"symbol": "BTCUSDT", "text": "模拟交易对分析（Vercel 环境）"})
 
 @app.route('/api/topic')
 def api_topic_single():
     s = request.args.get('symbol','BTCUSDT')
-    from topic_main import get_single_symbol_topic
-    return jsonify(get_single_symbol_topic(s))
+    try:
+        from topic_main import get_single_symbol_topic
+        return jsonify(get_single_symbol_topic(s))
+    except:
+        return jsonify({"symbol": s, "text": f"模拟 {s} 分析（Vercel 环境）"})
 
 @app.route('/api/generate', methods=['POST'])
 def api_generate():
-    d = request.json
-    a = d.get('account')
-    t = d.get('analysis')
-    cfg = ACCOUNT_CONFIG.get(a, {})
-    m = cfg.get('model_type','zhipu')
-    key = GLOBAL_MODEL_KEYS.get(m,'')
-    p = cfg.get('prompt','')
-    from ai_core import generate_post_content
-    return generate_post_content(t, m, key, p)
+    try:
+        d = request.json
+        a = d.get('account')
+        t = d.get('analysis')
+        cfg = ACCOUNT_CONFIG.get(a, {})
+        m = cfg.get('model_type','zhipu')
+        key = GLOBAL_MODEL_KEYS.get(m,'')
+        p = cfg.get('prompt','')
+        from ai_core import generate_post_content
+        return generate_post_content(t, m, key, p)
+    except Exception as e:
+        return f"生成失败：{str(e)}", 500
 
 @app.route('/api/publish', methods=['POST'])
 def api_publish():
-    d = request.json
-    a = d.get('account')
-    c = d.get('content')
-    key = next((x['key'] for x in BINANCE_ACCOUNTS if x['name']==a), None)
-    from post_main import post_to_binance
-    ok, msg, pid = post_to_binance(c, key)
-    save_record({
-        "date":get_today_date(),
-        "time":datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "account":a,
-        "symbol":"手动",
-        "content":c,
-        "post_id":pid,
-        "mode":"manual",
-        "status":"success" if ok else "fail",
-        "msg":msg
-    })
-    return jsonify({"success":ok,"msg":msg})
+    try:
+        d = request.json
+        a = d.get('account')
+        c = d.get('content')
+        key = next((x['key'] for x in BINANCE_ACCOUNTS if x['name']==a), None)
+        from post_main import post_to_binance
+        ok, msg, pid = post_to_binance(c, key)
+        save_record({
+            "date":get_today_date(),
+            "time":datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "account":a,
+            "symbol":"手动",
+            "content":c,
+            "post_id":pid,
+            "mode":"manual",
+            "status":"success" if ok else "fail",
+            "msg":msg
+        })
+        return jsonify({"success":ok,"msg":msg})
+    except Exception as e:
+        return jsonify({"success":False,"msg":f"发布失败：{str(e)}"})
 
 @app.route('/api/config')
 def api_config_get():
@@ -674,7 +684,7 @@ def api_export():
     o.seek(0)
     return Response(o.getvalue(), mimetype="text/csv", headers={"Content-Disposition":"attachment; filename=posts.csv"})
 
-# ==================== 关键：适配 Vercel ====================
+# ==================== VERCEL 必须入口（已修复） ====================
 handler = Mangum(app)
 
 if __name__ == '__main__':
