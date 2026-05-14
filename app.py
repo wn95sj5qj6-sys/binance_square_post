@@ -589,8 +589,13 @@ def api_topic_random():
     try:
         from topic_main import get_random_topic
         return jsonify(get_random_topic())
-    except:
-        return jsonify({"symbol": "BTCUSDT", "text": "模拟交易对分析（Vercel 环境）"})
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            "symbol": "BTCUSDT",
+            "text": f"模拟分析：BTCUSDT 当前处于震荡区间，可关注关键支撑位。\n错误信息：{str(e)}"
+        })
 
 @app.route('/api/topic')
 def api_topic_single():
@@ -598,8 +603,13 @@ def api_topic_single():
     try:
         from topic_main import get_single_symbol_topic
         return jsonify(get_single_symbol_topic(s))
-    except:
-        return jsonify({"symbol": s, "text": f"模拟 {s} 分析（Vercel 环境）"})
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            "symbol": s,
+            "text": f"模拟分析：{s} 当前行情波动较大，需结合市场消息综合判断。\n错误信息：{str(e)}"
+        })
 
 @app.route('/api/generate', methods=['POST'])
 def api_generate():
