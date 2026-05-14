@@ -7,15 +7,15 @@ from io import StringIO
 
 app = Flask(__name__)
 
-# ==================== 内存变量 ====================
-BINANCE_ACCOUNTS = []
-GLOBAL_MODEL_KEYS = {
+# ==================== 全部使用内存存储（无任何文件写入） ====================
+BINANCE_ACCOUNTS = []          # 币安账号列表 [{"name": "xx", "key": "xx"}]
+GLOBAL_MODEL_KEYS = {          # 全局模型 API Key
     "zhipu": "",
     "deepseek": ""
 }
-ACCOUNT_CONFIG = {}
-AUTO_TASKS = {}
-RECORDS = []
+ACCOUNT_CONFIG = {}             # 账号专属配置 { "账号名": {"model_type":..., "prompt":..., "daily_limit":...} }
+AUTO_TASKS = {}                 # 自动任务配置（预留）
+RECORDS = []                    # 发文记录（内存存储，重启会丢失）
 
 # ==================== 工具函数 ====================
 def get_today_date():
@@ -25,9 +25,11 @@ def calculate_remaining(used, limit):
     return max(0, limit - used)
 
 def load_records():
+    """返回所有记录（内存）"""
     return RECORDS
 
 def save_record(record):
+    """保存记录到内存"""
     RECORDS.append(record)
 
 def get_today_stats():
@@ -37,9 +39,9 @@ def get_today_stats():
         name = acc["name"]
         cfg = ACCOUNT_CONFIG.get(name, {})
         limit = cfg.get("daily_limit", 8)
-        used = sum(1 for r in RECORDS if r["date"] == today and r["account"] == name and r["status"] == "success")
-        auto_used = sum(1 for r in RECORDS if r["date"] == today and r["account"] == name and r["status"] == "success" and r["mode"] == "auto")
-        manual_used = sum(1 for r in RECORDS if r["date"] == today and r["account"] == name and r["status"] == "success" and r["mode"] == "manual")
+        used = sum(1 for r in RECORDS if r.get("date") == today and r.get("account") == name and r.get("status") == "success")
+        auto_used = sum(1 for r in RECORDS if r.get("date") == today and r.get("account") == name and r.get("status") == "success" and r.get("mode") == "auto")
+        manual_used = sum(1 for r in RECORDS if r.get("date") == today and r.get("account") == name and r.get("status") == "success" and r.get("mode") == "manual")
         stats[name] = {
             "used": used,
             "auto_used": auto_used,
@@ -50,7 +52,7 @@ def get_today_stats():
         }
     return stats
 
-# ==================== 前端 UI ====================
+# ==================== 前端 UI（完全保留你原来的样式） ====================
 UI_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="zh-CN">
@@ -493,38 +495,19 @@ UI_TEMPLATE = """
 </html>
 """
 
-# ==================== 核心修复：永不崩溃 ====================
+# ==================== 基础路由（全部无文件操作） ====================
 @app.route('/')
 def index():
     try:
         return render_template_string(UI_TEMPLATE, accounts=BINANCE_ACCOUNTS)
-    except:
-        return "系统正常运行中", 200
+    except Exception as e:
+        return f"系统正常运行中 (错误:{str(e)})", 200
 
 @app.route('/api/topic/random')
 def api_topic_random():
     try:
-        import requests
-        import random
-        # 1. 获取币安24小时涨跌幅数据
-        resp = requests.get("https://fapi.binance.com/fapi/v1/ticker/24hr", timeout=5)
-        tickers = resp.json()
-        usdt_pairs = [t for t in tickers if t["symbol"].endswith("USDT")]
-        # 2. 选波动最大的前20里随机一个
-        sorted_pairs = sorted(usdt_pairs, key=lambda x: abs(float(x["priceChangePercent"])), reverse=True)[:20]
-        selected = random.choice(sorted_pairs)
-        symbol = selected["symbol"]
-        # 3. 获取当前价格和涨跌幅
-        price = float(selected["lastPrice"])
-        change = float(selected["priceChangePercent"])
-        # 4. 生成简单分析文案
-        if change > 5:
-            text = f"{symbol} 当前价格：{price:.4f}，24小时涨幅{change:.2f}%，短期多头强势，注意追高风险。"
-        elif change < -5:
-            text = f"{symbol} 当前价格：{price:.4f}，24小时跌幅{change:.2f}%，短期空头主导，可关注超跌反弹机会。"
-        else:
-            text = f"{symbol} 当前价格：{price:.4f}，24小时波动较小，处于震荡区间，等待方向选择。"
-        return {"symbol": symbol, "text": text}
+        from topic_main import get_random_topic
+        return jsonify(get_random_topic())
     except Exception as e:
         return {"symbol": "BTCUSDT", "text": "BTCUSDT 行情获取成功（网络波动）"}
 
@@ -532,20 +515,8 @@ def api_topic_random():
 def api_topic_single():
     s = request.args.get('symbol', 'BTCUSDT')
     try:
-        import requests
-        # 1. 获取指定交易对数据
-        resp = requests.get(f"https://fapi.binance.com/fapi/v1/ticker/24hr?symbol={s}", timeout=5)
-        data = resp.json()
-        price = float(data["lastPrice"])
-        change = float(data["priceChangePercent"])
-        # 2. 生成分析文案
-        if change > 5:
-            text = f"{s} 当前价格：{price:.4f}，24小时涨幅{change:.2f}%，短期多头强势，注意追高风险。"
-        elif change < -5:
-            text = f"{s} 当前价格：{price:.4f}，24小时跌幅{change:.2f}%，短期空头主导，可关注超跌反弹机会。"
-        else:
-            text = f"{s} 当前价格：{price:.4f}，24小时波动较小，处于震荡区间，等待方向选择。"
-        return {"symbol": s, "text": text}
+        from topic_main import get_single_symbol_topic
+        return jsonify(get_single_symbol_topic(s))
     except Exception as e:
         return {"symbol": s, "text": f"{s} 行情获取成功（网络波动）"}
 
@@ -553,10 +524,29 @@ def api_topic_single():
 def api_generate():
     try:
         data = request.json
+        account = data.get("account")
         analysis = data.get("analysis", "")
-        return f"【发文内容】\n{analysis}\n#加密货币 #交易机会"
-    except:
-        return "生成成功（演示模式）"
+        # 获取账号模型配置
+        cfg = ACCOUNT_CONFIG.get(account, {})
+        model_type = cfg.get("model_type", "zhipu")
+        custom_prompt = cfg.get("prompt", "")
+
+        # 调用真实的 LLM（导入 ai_core）
+        from ai_core import generate_content
+        api_key = None
+        if model_type == "zhipu":
+            api_key = GLOBAL_MODEL_KEYS.get("zhipu", "")
+        elif model_type == "deepseek":
+            # deepseek 暂未实现，可扩展
+            api_key = GLOBAL_MODEL_KEYS.get("deepseek", "")
+        if not api_key:
+            return "请先在配置中设置全局API Key"
+        # 构造话题字典
+        topic = {"text": analysis, "symbol": ""}
+        content, _ = generate_content(topic, api_key, custom_prompt)
+        return content if content else "生成失败，请检查API Key或网络"
+    except Exception as e:
+        return f"生成失败: {str(e)}"
 
 @app.route('/api/publish', methods=['POST'])
 def api_publish():
@@ -564,22 +554,33 @@ def api_publish():
         data = request.json
         account = data.get("account")
         content = data.get("content")
+        # 调用真实发文（导入 post_main）
+        from post_main import post_content
+        # 获取该账号的币安API Key
+        acc_info = next((a for a in BINANCE_ACCOUNTS if a["name"] == account), None)
+        if not acc_info:
+            return jsonify({"success": False, "msg": "账号不存在"})
+        api_key = acc_info["key"]
+        success, msg, post_id = post_content(content, api_key)
+        # 保存记录
         save_record({
             "date": get_today_date(),
             "time": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "account": account,
             "symbol": "手动",
             "content": content,
-            "post_id": "",
+            "post_id": post_id,
             "mode": "manual",
-            "status": "success",
-            "msg": "发布成功（演示）"
+            "status": "success" if success else "fail",
+            "msg": msg
         })
-        return {"success": True, "msg": "发布成功（演示模式）"}
-    except:
-        return {"success": False, "msg": "发布成功（演示）"}
+        if success:
+            return jsonify({"success": True, "msg": "发布成功", "post_id": post_id})
+        else:
+            return jsonify({"success": False, "msg": f"发布失败: {msg}"})
+    except Exception as e:
+        return jsonify({"success": False, "msg": str(e)})
 
-# ==================== 基础路由 ====================
 @app.route('/api/global_keys')
 def api_global_keys():
     return jsonify({"deepseek": bool(GLOBAL_MODEL_KEYS["deepseek"]), "zhipu": bool(GLOBAL_MODEL_KEYS["zhipu"])})
@@ -587,9 +588,11 @@ def api_global_keys():
 @app.route('/api/global_keys/save', methods=['POST'])
 def api_global_save():
     d = request.json
-    if d.get('deepseek'): GLOBAL_MODEL_KEYS['deepseek'] = d['deepseek']
-    if d.get('zhipu'): GLOBAL_MODEL_KEYS['zhipu'] = d['zhipu']
-    return jsonify({"msg":"ok"})
+    if d.get('deepseek'):
+        GLOBAL_MODEL_KEYS['deepseek'] = d['deepseek']
+    if d.get('zhipu'):
+        GLOBAL_MODEL_KEYS['zhipu'] = d['zhipu']
+    return jsonify({"msg": "ok"})
 
 @app.route('/api/binance/add', methods=['POST'])
 def api_binance_add():
@@ -598,17 +601,18 @@ def api_binance_add():
     k = d.get('key')
     for a in BINANCE_ACCOUNTS:
         if a['name'] == n:
-            return jsonify({"msg":"已存在"})
-    BINANCE_ACCOUNTS.append({"name":n,"key":k})
-    return jsonify({"msg":"添加成功"})
+            return jsonify({"msg": "账号已存在"})
+    BINANCE_ACCOUNTS.append({"name": n, "key": k})
+    return jsonify({"msg": "添加成功"})
 
 @app.route('/api/binance/delete', methods=['POST'])
 def api_binance_del():
     n = request.json.get('name')
     global BINANCE_ACCOUNTS
-    BINANCE_ACCOUNTS = [a for a in BINANCE_ACCOUNTS if a['name']!=n]
-    if n in ACCOUNT_CONFIG: del ACCOUNT_CONFIG[n]
-    return jsonify({"msg":"删除成功"})
+    BINANCE_ACCOUNTS = [a for a in BINANCE_ACCOUNTS if a['name'] != n]
+    if n in ACCOUNT_CONFIG:
+        del ACCOUNT_CONFIG[n]
+    return jsonify({"msg": "删除成功"})
 
 @app.route('/api/stats')
 def api_stats():
@@ -624,41 +628,47 @@ def api_config_save():
     d = request.json
     a = d.get('account')
     ACCOUNT_CONFIG[a] = {
-        "model_type":d.get('model_type'),
-        "prompt":d.get('prompt'),
-        "daily_limit":d.get('daily_limit'),
-        "auto_interval":60
+        "model_type": d.get('model_type'),
+        "prompt": d.get('prompt'),
+        "daily_limit": d.get('daily_limit'),
+        "auto_interval": 60
     }
-    return jsonify({"msg":"ok"})
+    return jsonify({"msg": "ok"})
 
 @app.route('/api/records')
 def api_records():
-    a = request.args.get('account','')
-    d = request.args.get('date','')
+    a = request.args.get('account', '')
+    d = request.args.get('date', '')
     r = load_records()
     f = []
     for x in r:
-        if a and x.get('account')!=a: continue
-        if d and x.get('date')!=d: continue
+        if a and x.get('account') != a:
+            continue
+        if d and x.get('date') != d:
+            continue
         f.append(x)
     return jsonify(f)
 
 @app.route('/api/export')
 def api_export():
-    a = request.args.get('account','')
-    d = request.args.get('date','')
+    a = request.args.get('account', '')
+    d = request.args.get('date', '')
     r = load_records()
     o = StringIO()
     w = csv.writer(o)
-    w.writerow(["日期","时间","账号","模式","交易对","内容","状态","消息"])
+    w.writerow(["日期", "时间", "账号", "模式", "交易对", "内容", "状态", "消息"])
     for x in r:
-        if a and x.get('account')!=a: continue
-        if d and x.get('date')!=d: continue
-        w.writerow([x.get('date'),x.get('time'),x.get('account'),x.get('mode'),x.get('symbol'),x.get('content'),x.get('status'),x.get('msg')])
+        if a and x.get('account') != a:
+            continue
+        if d and x.get('date') != d:
+            continue
+        w.writerow([x.get('date'), x.get('time'), x.get('account'), x.get('mode'),
+                    x.get('symbol'), x.get('content'), x.get('status'), x.get('msg')])
     o.seek(0)
-    return Response(o.getvalue(), mimetype="text/csv", headers={"Content-Disposition":"attachment; filename=posts.csv"})
+    return Response(o.getvalue(), mimetype="text/csv",
+                    headers={"Content-Disposition": "attachment; filename=posts.csv"})
 
-# ==================== VERCEL 入口 ====================
+# ==================== Vercel 入口 ====================
 handler = Mangum(app)
 
 if __name__ == '__main__':
